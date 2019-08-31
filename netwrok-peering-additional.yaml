@@ -1,0 +1,149 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Additional peering requirements after network laid down.
+
+Parameters:
+
+  SemiAutoEnterpriseVpc1Id:
+    Description: VPC id of semiauto E1 VPC
+    Type: String
+    Default: ""
+
+  SemiAutoEnterpriseVpc1PrivateSubnetRouteTableId:
+    Description: Route table id
+    Type: String
+    Default: ""
+
+  AutoAccountId:
+    Description: Account id of auto account
+    Type: String
+    Default: ""
+
+  AutoPeerAcceptorRoleArn:
+    Description: Role ARN of peer request acceptor role
+    Type: String
+    Default: ""
+
+  AutoEnterpriseVpc1Id:
+    Description: VPC id of auto E1 VPC
+    Type: String
+    Default: ""
+
+  AutoEnterpriseVpc1Cidr:
+    Description: CIDR block for VPC.
+    Type: String
+    Default: ""
+
+  AutoInternetDmzVpcId:
+    Description: VPC id of auto InternetDmz VPC
+    Type: String
+    Default: ""
+
+  AutoInternetDmzVpcCidr:
+    Description: CIDR block for VPC.
+    Type: String
+    Default: ""
+
+Mappings:
+
+  # nonprod-semiauto
+  "213":
+    ap-southeast-1:
+      PeerSource: ""
+
+Conditions:
+
+  IsFullAutoAccount:
+    Fn::Or:
+      - Fn::Equals: [ Ref: 'AWS::AccountId', '132' ] # nonprod-auto
+
+  IsSemiAutoAccount:
+    Fn::Or:
+      - Fn::Equals: [ Ref: 'AWS::AccountId', '2132' ] # nonprod-semiauto
+
+Resources:
+
+  PeerAcceptorRole:
+    Type: AWS::IAM::Role
+    Condition: IsFullAutoAccount
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Principal:
+              AWS:
+                Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", PeerSource ]
+            Action:
+              - sts:AssumeRole
+            Effect: Allow
+      Path: /
+      Policies:
+        - PolicyName: AllowAcceptVpcPeeringConnection
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ec2:AcceptVpcPeeringConnection
+                Resource: '*'
+
+  EnterpriseVpc1AutoEnterpriseVpc1VpcPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Condition: IsSemiAutoAccount
+    Properties:
+      VpcId: { Ref: SemiAutoEnterpriseVpc1Id }
+      PeerVpcId: { Ref: AutoEnterpriseVpc1Id }
+      PeerOwnerId: { Ref: AutoAccountId }
+      PeerRoleArn: { Ref: AutoPeerAcceptorRoleArn }
+      Tags:
+        - Key: Name
+          Value: { "Fn::Sub": "${AWS::StackName}:EnterpriseVpc1AutoEnterpriseVpc1VpcPeeringConnection" }
+
+  EnterpriseVpc1AutoEnterpriseVpc1Route:
+    Type: AWS::EC2::Route
+    Condition: IsSemiAutoAccount
+    Properties:
+      DestinationCidrBlock:
+        Ref: AutoEnterpriseVpc1Cidr
+      VpcPeeringConnectionId:
+        Ref: EnterpriseVpc1AutoEnterpriseVpc1VpcPeeringConnection
+      RouteTableId:
+        Ref: SemiAutoEnterpriseVpc1PrivateSubnetRouteTableId
+
+  EnterpriseVpc1AutoInternetDmzVpcVpcPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Condition: IsSemiAutoAccount
+    Properties:
+      VpcId: { Ref: SemiAutoEnterpriseVpc1Id }
+      PeerVpcId: { Ref: AutoInternetDmzVpcId }
+      PeerOwnerId: { Ref: AutoAccountId }
+      PeerRoleArn: { Ref: AutoPeerAcceptorRoleArn }
+      Tags:
+        - Key: Name
+          Value: { "Fn::Sub": "${AWS::StackName}:EnterpriseVpc1AutoInternetDmzVpcVpcPeeringConnection" }
+
+  EnterpriseVpc1AutoInternetDmzVpcRoute:
+    Type: AWS::EC2::Route
+    Condition: IsSemiAutoAccount
+    Properties:
+      DestinationCidrBlock:
+        Ref: AutoInternetDmzVpcCidr
+      VpcPeeringConnectionId:
+        Ref: EnterpriseVpc1AutoInternetDmzVpcVpcPeeringConnection
+      RouteTableId:
+        Ref: SemiAutoEnterpriseVpc1PrivateSubnetRouteTableId
+
+Outputs:
+
+  FullAutoPeerAcceptorRoleArn:
+    Condition: IsFullAutoAccount
+    Value:
+      Fn::GetAtt: [ PeerAcceptorRole, Arn ]
+
+  EnterpriseVpc1AutoEnterpriseVpc1VpcPeeringConnectionId:
+    Condition: IsSemiAutoAccount
+    Value:
+      Ref: EnterpriseVpc1AutoEnterpriseVpc1VpcPeeringConnection
+
+  EnterpriseVpc1AutoInternetDmzVpcVpcPeeringConnectionId:
+    Condition: IsSemiAutoAccount
+    Value:
+      Ref: EnterpriseVpc1AutoInternetDmzVpcVpcPeeringConnection
