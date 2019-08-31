@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Master network stack
+
+Parameters:
+
+  PublicOnlyRootHostedZone:
+    Type: String
+
+  PublicOnlyRootHostedZoneName:
+    Type: String
+
+  PublicOnlyDelegation1Name:
+    Type: String
+    Default: ''
+
+  PublicOnlyDelegation1NsRecords:
+    Type: CommaDelimitedList
+    Default: ''
+
+  PublicOnlyDelegation2Name:
+    Type: String
+    Default: ''
+
+  PublicOnlyDelegation2NsRecords:
+    Type: CommaDelimitedList
+    Default: ''
+
+  PublicOnlyDelegation3Name:
+    Type: String
+    Default: ''
+
+  PublicOnlyDelegation3NsRecords:
+    Type: CommaDelimitedList
+    Default: ''
+
+  PublicOnlyDelegation4Name:
+    Type: String
+    Default: ''
+
+  PublicOnlyDelegation4NsRecords:
+    Type: CommaDelimitedList
+    Default: ''
+
+  PublicOnlyDelegation5Name:
+    Type: String
+    Default: ''
+
+  PublicOnlyDelegation5NsRecords:
+    Type: CommaDelimitedList
+    Default: ''
+
+  PublicOnlyDelegation6Name:
+    Type: String
+    Default: ''
+
+  PublicOnlyDelegation6NsRecords:
+    Type: CommaDelimitedList
+    Default: ''
+
+Conditions:
+  CreateHostedZone: { "Fn::Equals": [ Ref: "AWS::Region", "ap-southeast-1" ] }
+  CreateDelegation1: { "Fn::And": [ Condition: CreateHostedZone, { "Fn::Not": [ "Fn::Equals": [ Ref: PublicOnlyDelegation1Name, "" ] ]} ] }
+  CreateDelegation2: { "Fn::And": [ Condition: CreateHostedZone, { "Fn::Not": [ "Fn::Equals": [ Ref: PublicOnlyDelegation2Name, "" ] ]} ] }
+  CreateDelegation3: { "Fn::And": [ Condition: CreateHostedZone, { "Fn::Not": [ "Fn::Equals": [ Ref: PublicOnlyDelegation3Name, "" ] ]} ] }
+  CreateDelegation4: { "Fn::And": [ Condition: CreateHostedZone, { "Fn::Not": [ "Fn::Equals": [ Ref: PublicOnlyDelegation4Name, "" ] ]} ] }
+  CreateDelegation5: { "Fn::And": [ Condition: CreateHostedZone, { "Fn::Not": [ "Fn::Equals": [ Ref: PublicOnlyDelegation5Name, "" ] ]} ] }
+  CreateDelegation6: { "Fn::And": [ Condition: CreateHostedZone, { "Fn::Not": [ "Fn::Equals": [ Ref: PublicOnlyDelegation6Name, "" ] ]} ] }
+
+Resources:
+
+  #Commented out because zone already existed
+  # PublicOnlyRootHostedZone:
+  #   Condition: CreateHostedZone
+  #   Type: AWS::Route53::HostedZone
+  #   Properties:
+  #     Name:
+  #       Ref: PublicOnlyRootHostedZoneName
+
+  PublicOnlyDelegation1NsRecordSet:
+    Condition: CreateDelegation1
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: PublicOnlyRootHostedZone
+      Name:
+        Ref: PublicOnlyDelegation1Name
+      Type: NS
+      TTL: 3600
+      ResourceRecords:
+        Ref: PublicOnlyDelegation1NsRecords
+
+  PublicOnlyDelegation2NsRecordSet:
+    Condition: CreateDelegation2
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: PublicOnlyRootHostedZone
+      Name:
+        Ref: PublicOnlyDelegation2Name
+      Type: NS
+      TTL: 3600
+      ResourceRecords:
+        Ref: PublicOnlyDelegation2NsRecords
+
+  PublicOnlyDelegation3NsRecordSet:
+    Condition: CreateDelegation3
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: PublicOnlyRootHostedZone
+      Name:
+        Ref: PublicOnlyDelegation3Name
+      Type: NS
+      TTL: 3600
+      ResourceRecords:
+        Ref: PublicOnlyDelegation3NsRecords
+
+  PublicOnlyDelegation4NsRecordSet:
+    Condition: CreateDelegation4
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: PublicOnlyRootHostedZone
+      Name:
+        Ref: PublicOnlyDelegation4Name
+      Type: NS
+      TTL: 3600
+      ResourceRecords:
+        Ref: PublicOnlyDelegation4NsRecords
+
+  PublicOnlyDelegation5NsRecordSet:
+    Condition: CreateDelegation5
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: PublicOnlyRootHostedZone
+      Name:
+        Ref: PublicOnlyDelegation5Name
+      Type: NS
+      TTL: 3600
+      ResourceRecords:
+        Ref: PublicOnlyDelegation5NsRecords
+
+  PublicOnlyDelegation6NsRecordSet:
+    Condition: CreateDelegation6
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: PublicOnlyRootHostedZone
+      Name:
+        Ref: PublicOnlyDelegation6Name
+      Type: NS
+      TTL: 3600
+      ResourceRecords:
+        Ref: PublicOnlyDelegation6NsRecords
+
+Outputs:
+  PublicOnlyRootHostedZoneName:
+    Condition: CreateHostedZone
+    Value:
+      Ref: PublicOnlyRootHostedZoneName
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}:PublicOnlyRootHostedZoneName"
+
+  PublicOnlyRootHostedZoneId:
+    Condition: CreateHostedZone
+    Value:
+      Ref: PublicOnlyRootHostedZone
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}:PublicOnlyRootHostedZoneId"
