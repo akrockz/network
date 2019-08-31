@@ -1,0 +1,1887 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Services VPC resources
+
+Parameters:
+  AzList:
+    Description: Comma delimited list of AZs in this region
+    Type: String
+
+  ResourceNamespace:
+    Description: Output export prefix
+    Type: String
+
+  VpcId:
+    Description: VPC id
+    Type: String
+
+  VpcName:
+    Description: VPC Name
+    Type: String
+
+  DmzSubnetCidrs:
+    Description: DMZ subnet CIDR list
+    Type: CommaDelimitedList
+
+  ProxySubnetCidrs:
+    Description: Proxy subnet CIDR list
+    Type: CommaDelimitedList
+
+  PrivateSubnetCidrs:
+    Description: Private subnet CIDR list
+    Type: CommaDelimitedList
+
+  NetSubnetCidrs:
+    Description: Net subnet CIDR list
+    Type: CommaDelimitedList
+
+  BastionSubnetCidrs:
+    Description: Bastion subnet CIDR list
+    Type: CommaDelimitedList
+
+  PeeringCidrBlocks:
+    Description: List of peering CIDR blocks
+    Type: CommaDelimitedList
+
+  PeeringConnectionIds:
+    Description: List of of peering connection ids
+    Type: CommaDelimitedList
+
+  # CustomerGateway1Id:
+  #   Description: Customer gateway id
+  #   Type: String
+
+Mappings:
+  # Account: Services NonProduction
+  "213232":
+    ap-southeast-1:
+      VpcCidrs: "101.1119.0.0/16"
+      OnPremCidrs: "110.10.0.0/8"
+    ap-northeast-1:
+      VpcCidrs: "101.1125.128.0/17"
+      OnPremCidrs: "101.10.0.0/8"
+
+
+Conditions:
+  ThreeAzs: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 2, "Fn::Split": [ ",",  "Fn::Sub": "${AzList},," ] ], "" ] ] }
+  PeeringConnection0Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 0, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection1Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 1, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection2Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 2, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection3Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 3, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection4Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 4, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection5Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 5, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection6Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 6, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection7Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 7, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection8Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 8, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection9Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 9, Ref: PeeringConnectionIds ], "" ] ] }
+  SingaporeRegion: { "Fn::Equals": [ Ref: "AWS::Region", "ap-southeast-1" ] }
+  NonProdServiceAccount: { "Fn::And": [ Condition: SingaporeRegion, !Equals [ Ref: 'AWS::AccountId', '132132' ] ] }
+
+Resources:
+
+  # == VPC resources ==
+
+  VpnGateway:
+    Type: AWS::EC2::VPNGateway
+    Properties:
+      Type: ipsec.1
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:VpnGateway1"
+
+  VpnGatewayVpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpnGatewayId:
+        Ref: VpnGateway
+      VpcId:
+        Ref: VpcId
+
+  # CustomerGateway1VpnConnection:
+  #   Type: AWS::EC2::VPNConnection
+  #   Properties:
+  #     Type: ipsec.1
+  #     CustomerGatewayId:
+  #       Ref: CustomerGateway1Id
+  #     StaticRoutesOnly: 'false'
+  #     VpnGatewayId:
+  #       Ref: VpnGateway
+  #     Tags:
+  #       - Key: Name
+  #         Value:
+  #           Fn::Sub: "${ResourceNamespace}:${VpcName}:CustomerGateway1VpnConnection"
+
+  VpnGatewayRoutePropagation:
+    DependsOn: VpnGatewayVpcGatewayAttachment
+    Type: AWS::EC2::VPNGatewayRoutePropagation
+    Properties:
+      RouteTableIds:
+        - Ref: BastionSubnetRouteTable
+        - Ref: NetSubnetRouteTable
+        - Ref: PrivateSubnetRouteTable
+      VpnGatewayId:
+        Ref: VpnGateway
+
+  VpcFlowLogIamRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "vpc-flow-logs.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+
+  VpcFlowLogIamRolePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "root"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - 'logs:CreateLogGroup'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+              - 'logs:DescribeLogGroups'
+              - 'logs:DescribeLogStreams'
+            Effect: Allow
+            Resource: '*'
+      Roles:
+        -
+          Ref: VpcFlowLogIamRole
+
+  VpcLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      RetentionInDays: 90
+      LogGroupName:
+        Fn::Sub: "${ResourceNamespace}-${VpcName}"
+
+  VpcFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn:
+        Fn::GetAtt:
+          - VpcFlowLogIamRole
+          - Arn
+      LogGroupName:
+        Ref: VpcLogGroup
+      ResourceId:
+        Ref: VpcId
+      ResourceType: VPC
+      TrafficType: ALL
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:InternetGateway"
+
+  VpcIgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId:
+        Ref: InternetGateway
+      VpcId:
+        Ref: VpcId
+
+  VpcS3Endpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - '*'
+            Resource:
+              - 'arn:aws:s3:::*'
+      RouteTableIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: ProxySubnet1RouteTable
+            - Ref: ProxySubnet2RouteTable
+            - Ref: ProxySubnet3RouteTable
+            - Ref: PrivateSubnetRouteTable
+            - Ref: NetSubnetRouteTable
+            - Ref: BastionSubnetRouteTable
+          - - Ref: ProxySubnet1RouteTable
+            - Ref: ProxySubnet2RouteTable
+            - Ref: PrivateSubnetRouteTable
+            - Ref: NetSubnetRouteTable
+            - Ref: BastionSubnetRouteTable
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.s3"
+      VpcId:
+        Ref: VpcId
+
+  VpcDynamoDbEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - "*"
+            Resource:
+              - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*
+      RouteTableIds:
+        - Ref: PrivateSubnetRouteTable
+      ServiceName:
+        Fn::Sub: com.amazonaws.${AWS::Region}.dynamodb
+      VpcId:
+        Ref: VpcId
+
+  # == DMZ subnets ==
+
+  DmzSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 0, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 0, { Ref: DmzSubnetCidrs } ] }
+      MapPublicIpOnLaunch: true
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:DmzSubnet1"
+
+  DmzSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 1, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 1, { Ref: DmzSubnetCidrs } ] }
+      MapPublicIpOnLaunch: true
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:DmzSubnet2"
+
+  DmzSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: ThreeAzs
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 2, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 2, { Ref: DmzSubnetCidrs } ] }
+      MapPublicIpOnLaunch: true
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:DmzSubnet3"
+
+  DmzSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:DmzSubnetRouteTable"
+
+  DmzSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: DmzSubnetRouteTable
+      SubnetId:
+        Ref: DmzSubnet1
+
+  DmzSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: DmzSubnetRouteTable
+      SubnetId:
+        Ref: DmzSubnet2
+
+  DmzSubnet3RouteTableAssociation:
+    Condition: ThreeAzs
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: DmzSubnetRouteTable
+      SubnetId:
+        Ref: DmzSubnet3
+
+  NatGateway1Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway2Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway3Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway4Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway5Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway6Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway7Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway8Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway9Eip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcIgwAttachment
+    Properties:
+      Domain: VPC
+
+  NatGateway1:
+    DependsOn: VpcIgwAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: [ NatGateway1Eip, AllocationId ]
+      SubnetId:
+        Ref: DmzSubnet1
+
+  NatGateway2:
+    DependsOn: VpcIgwAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: [ NatGateway2Eip, AllocationId ]
+      SubnetId:
+        Ref: DmzSubnet2
+
+  NatGateway3:
+    Condition: ThreeAzs
+    DependsOn: VpcIgwAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: [ NatGateway3Eip, AllocationId ]
+      SubnetId:
+        Ref: DmzSubnet3
+
+  DmzSubnetIgwRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcIgwAttachment
+    Properties:
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId:
+        Ref: InternetGateway
+      RouteTableId:
+        Ref: DmzSubnetRouteTable
+
+  # == Proxy subnets ==
+
+  ProxySubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 0, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 0, { Ref: ProxySubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:ProxySubnet1"
+
+  ProxySubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 1, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 1, { Ref: ProxySubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:ProxySubnet2"
+
+  ProxySubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: ThreeAzs
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 2, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 2, { Ref: ProxySubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:ProxySubnet3"
+
+  ProxySubnet1RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:ProxySubnet1RouteTable"
+
+  ProxySubnet2RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:ProxySubnet2RouteTable"
+
+  ProxySubnet3RouteTable:
+    Condition: ThreeAzs
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:ProxySubnet3RouteTable"
+
+  ProxySubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: ProxySubnet1RouteTable
+      SubnetId:
+        Ref: ProxySubnet1
+
+  ProxySubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: ProxySubnet2RouteTable
+      SubnetId:
+        Ref: ProxySubnet2
+
+  ProxySubnet3RouteTableAssociation:
+    Condition: ThreeAzs
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: ProxySubnet3RouteTable
+      SubnetId:
+        Ref: ProxySubnet3
+
+  ProxySubnet1NatGateway1Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: ProxySubnet1RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway1
+
+  ProxySubnet2NatGateway2Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: ProxySubnet2RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway2
+
+  ProxySubnet3NatGateway3Route:
+    Condition: ThreeAzs
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: ProxySubnet3RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway3
+
+  # == Private subnets ==
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 0, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 0, { Ref: PrivateSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:PrivateSubnet1"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 1, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 1, { Ref: PrivateSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:PrivateSubnet2"
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: ThreeAzs
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 2, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 2, { Ref: PrivateSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:PrivateSubnet3"
+
+  PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnetRouteTable"
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: PrivateSubnet2
+
+  PrivateSubnet3RouteTableAssociation:
+    Condition: ThreeAzs
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: PrivateSubnet3
+
+  # == Net subnets ==
+
+  NetSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 0, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 0, { Ref: NetSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:NetSubnet1"
+
+  NetSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 1, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 1, { Ref: NetSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:NetSubnet2"
+
+  NetSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: ThreeAzs
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 2, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 2, { Ref: NetSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:NetSubnet3"
+
+  NetSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:NetSubnetRouteTable"
+
+  NetSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: NetSubnetRouteTable
+      SubnetId:
+        Ref: NetSubnet1
+
+  NetSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: NetSubnetRouteTable
+      SubnetId:
+        Ref: NetSubnet2
+
+  NetSubnet3RouteTableAssociation:
+    Condition: ThreeAzs
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: NetSubnetRouteTable
+      SubnetId:
+        Ref: NetSubnet3
+
+  # == Bastion subnets ==
+
+  BastionSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 0, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 0, { Ref: BastionSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:BastionSubnet1"
+
+  BastionSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 1, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 1, { Ref: BastionSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:BastionSubnet2"
+
+  BastionSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: ThreeAzs
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 2, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 2, { Ref: BastionSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${VpcName}:BastionSubnet3"
+
+  BastionSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnetRouteTable"
+
+  BastionSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: BastionSubnetRouteTable
+      SubnetId:
+        Ref: BastionSubnet1
+
+  BastionSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: BastionSubnetRouteTable
+      SubnetId:
+        Ref: BastionSubnet2
+
+  BastionSubnet3RouteTableAssociation:
+    Condition: ThreeAzs
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: BastionSubnetRouteTable
+      SubnetId:
+        Ref: BastionSubnet3
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DbSubnetGroup
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:DbSubnetGroup"
+
+  ElastiCacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: ElastiCacheSubnetGroup
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+
+  PlatformSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Platform security group
+      GroupName:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PlatformSecurityGroup"
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - CidrIp: { "Fn::Select": [ 0, Ref: BastionSubnetCidrs ] }
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "SSH access from Bastion Subnet in AZ1"
+        - CidrIp: { "Fn::Select": [ 1, Ref: BastionSubnetCidrs ] }
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "SSH access from Bastion Subnet in AZ2"
+        - CidrIp: { "Fn::Select": [ 2, Ref: BastionSubnetCidrs ] }
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "SSH access from Bastion Subnet in AZ3"
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:PlatformSecurityGroup"
+
+  EndpointSecurityGroup:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Platform endpoint security group
+      GroupName:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:EndpointSecurityGroup"
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - CidrIp: !FindInMap [ Ref: "AWS::AccountId", Ref: "AWS::Region", VpcCidrs ]
+          FromPort: 443
+          IpProtocol: TCP
+          ToPort: 443
+          Description: "443 access from all Subnets from its environment VPCs"
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: "${ResourceNamespace}:${VpcName}:EndpointSecurityGroup"
+
+  # VpcApiGatewayEndpoint:
+  #   Condition: SingaporeRegion
+  #   Type: AWS::EC2::VPCEndpoint
+  #   Properties:
+  #     # PolicyDocument: Default
+  #     PrivateDnsEnabled: True
+  #     SecurityGroupIds:
+  #       - Ref: EndpointSecurityGroup
+  #     ServiceName:
+  #       Fn::Sub: "com.amazonaws.${AWS::Region}.apigateway"
+  #     SubnetIds:
+  #       Fn::If:
+  #         - ThreeAzs
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #           - Ref: PrivateSubnet3
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #     VpcEndpointType: Interface
+  #     VpcId:
+  #       Ref: VpcId
+
+  VpcCloudFormationEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.cloudformation"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcCloudTrailEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.cloudtrail"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcCloudWatchEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.monitoring"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcCloudWatchEventsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.events"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcCloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.logs"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcCodePipelineEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.codepipeline"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcCodeBuildEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.codebuild"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcGitCodeCommitEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.git-codecommit"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcCodeCommitEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.codecommit"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcConfigEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.config"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcEc2Endpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ec2"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcEc2MessageEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ec2messages"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcExecuteApiEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.execute-api"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  # VpcLoadBalancingEndpoint:
+  #   Condition: SingaporeRegion
+  #   Type: AWS::EC2::VPCEndpoint
+  #   Properties:
+  #     # PolicyDocument: Default
+  #     PrivateDnsEnabled: True
+  #     SecurityGroupIds:
+  #       - Ref: EndpointSecurityGroup
+  #     ServiceName:
+  #       Fn::Sub: "com.amazonaws.${AWS::Region}.elasticloadbalancing"
+  #     SubnetIds:
+  #       Fn::If:
+  #         - ThreeAzs
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #           - Ref: PrivateSubnet3
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #     VpcEndpointType: Interface
+  #     VpcId:
+  #       Ref: VpcId
+
+  VpcElasticContainerRegistryEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ecr.api"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcElasticContainerRegistryDKREndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ecr.dkr"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcElasticContrainerServiceEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ecs"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcECSAgentEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ecs-agent"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcECSTlemetryEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ecs-telemetry"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcKeyManagementSystemEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.kms"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcKinesisDataFirehoseEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.kinesis-firehose"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcKinesisDataStreamsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.kinesis-streams"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcApiSageMakerEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.sagemaker.api"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcRuntimeSageMakerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.sagemaker.runtime"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  # VpcGlueEndpoint:
+  #   Type: AWS::EC2::VPCEndpoint
+  #   Condition: SingaporeRegion
+  #   Properties:
+  #     # PolicyDocument: Default
+  #     PrivateDnsEnabled: True
+  #     SecurityGroupIds:
+  #       - Ref: EndpointSecurityGroup
+  #     ServiceName:
+  #       Fn::Sub: "com.amazonaws.${AWS::Region}.glue"
+  #     SubnetIds:
+  #       Fn::If:
+  #         - ThreeAzs
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #           - Ref: PrivateSubnet3
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #     VpcEndpointType: Interface
+  #     VpcId:
+  #       Ref: VpcId
+
+  VpcSecretEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.secretsmanager"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  # VpcSecurityTokenServiceEndpoint:
+  #   Type: AWS::EC2::VPCEndpoint
+  #   Condition: SingaporeRegion
+  #   Properties:
+  #     # PolicyDocument: Default
+  #     PrivateDnsEnabled: True
+  #     SecurityGroupIds:
+  #       - Ref: EndpointSecurityGroup
+  #     ServiceName:
+  #       Fn::Sub: "com.amazonaws.${AWS::Region}.sts"
+  #     SubnetIds:
+  #       Fn::If:
+  #         - ThreeAzs
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #           - Ref: PrivateSubnet3
+  #         - - Ref: PrivateSubnet1
+  #           - Ref: PrivateSubnet2
+  #     VpcEndpointType: Interface
+  #     VpcId:
+  #       Ref: VpcId
+
+  VpcNotificationServiceEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: SingaporeRegion
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.sns"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcQueueServiceEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.sqs"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcSystemManagerEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ssm"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcSystemManagerMessageEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.ssmmessages"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  VpcSFTPEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: False
+      SecurityGroupIds:
+        - Ref: EndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.transfer"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+  SFTPEndpointSecurityGroup:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Platform endpoint security group for SFTP
+      GroupName:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:SFTPEndpointSecurityGroup"
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - CidrIp: !FindInMap [ Ref: "AWS::AccountId", Ref: "AWS::Region", VpcCidrs ]
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "22 access from all Subnets from its environment VPCs"
+        - CidrIp: !FindInMap [ Ref: "AWS::AccountId", Ref: "AWS::Region", OnPremCidrs ]
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "22 access from all Subnets from on-prem servers"
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:SFTPEndpointSecurityGroup"
+
+  VpcSFTPServerEndpoint:
+    Condition: SingaporeRegion
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      # PolicyDocument: Default
+      PrivateDnsEnabled: True
+      SecurityGroupIds:
+        - Ref: SFTPEndpointSecurityGroup
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.transfer.server"
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: VpcId
+
+Outputs:
+  BastionSubnetRouteTableId:
+    Value:
+      Ref: BastionSubnetRouteTable
+
+  NetSubnetRouteTableId:
+    Value:
+      Ref: NetSubnetRouteTable
+
+  ProxySubnet1RouteTableId:
+    Value:
+      Ref: ProxySubnet1RouteTable
+
+  ProxySubnet2RouteTableId:
+    Value:
+      Ref: ProxySubnet2RouteTable
+
+  ProxySubnet3RouteTableId:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Ref: ProxySubnet3RouteTable
+        - "none"
+
+  PrivateSubnetRouteTableId:
+    Value:
+      Ref: PrivateSubnetRouteTable
+
+  DmzSubnetRouteTableId:
+    Value:
+      Ref: DmzSubnetRouteTable
+
+  DmzSubnetIds:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Sub: "${DmzSubnet1},${DmzSubnet2},${DmzSubnet3}"
+        - Fn::Sub: "${DmzSubnet1},${DmzSubnet2}"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:DmzSubnetIds"
+
+  DmzSubnet1Id:
+    Value:
+      Ref: DmzSubnet1
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:DmzSubnet1Id"
+
+  DmzSubnet2Id:
+    Value:
+      Ref: DmzSubnet2
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:DmzSubnet2Id"
+
+  DmzSubnet3Id:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Ref: DmzSubnet3
+        - "none"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:DmzSubnet3Id"
+
+  ProxySubnetIds:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Sub: "${ProxySubnet1},${ProxySubnet2},${ProxySubnet3}"
+        - Fn::Sub: "${ProxySubnet1},${ProxySubnet2}"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:ProxySubnetIds"
+
+  ProxySubnet1Id:
+    Value:
+      Ref: ProxySubnet1
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:ProxySubnet1Id"
+
+  ProxySubnet2Id:
+    Value:
+      Ref: ProxySubnet2
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:ProxySubnet2Id"
+
+  ProxySubnet3Id:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Ref: ProxySubnet3
+        - "none"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:ProxySubnet3Id"
+
+  PrivateSubnetIds:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Sub: "${PrivateSubnet1},${PrivateSubnet2},${PrivateSubnet3}"
+        - Fn::Sub: "${PrivateSubnet1},${PrivateSubnet2}"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnetIds"
+
+  PrivateSubnet1Id:
+    Value:
+      Ref: PrivateSubnet1
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet1Id"
+
+  PrivateSubnet2Id:
+    Value:
+      Ref: PrivateSubnet2
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet2Id"
+
+  PrivateSubnet3Id:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Ref: PrivateSubnet3
+        - "none"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet3Id"
+
+  NetSubnetIds:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Sub: "${NetSubnet1},${NetSubnet2},${NetSubnet3}"
+        - Fn::Sub: "${NetSubnet1},${NetSubnet2}"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:NetSubnetIds"
+
+  NetSubnet1Id:
+    Value:
+      Ref: NetSubnet1
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:NetSubnet1Id"
+
+  NetSubnet2Id:
+    Value:
+      Ref: NetSubnet2
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:NetSubnet2Id"
+
+  NetSubnet3Id:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Ref: NetSubnet3
+        - "none"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:NetSubnet3Id"
+
+  BastionSubnetIds:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Sub: "${BastionSubnet1},${BastionSubnet2},${BastionSubnet3}"
+        - Fn::Sub: "${BastionSubnet1},${BastionSubnet2}"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnetIds"
+
+  BastionSubnet1Id:
+    Value:
+      Ref: BastionSubnet1
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnet1Id"
+
+  BastionSubnet2Id:
+    Value:
+      Ref: BastionSubnet2
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnet2Id"
+
+  BastionSubnet3Id:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Ref: BastionSubnet3
+        - "none"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnet3Id"
+
+  BastionSubnetCidrs:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Join:
+            - ","
+            - - Fn::Select: [ 0, Ref: BastionSubnetCidrs ]
+              - Fn::Select: [ 1, Ref: BastionSubnetCidrs ]
+              - Fn::Select: [ 2, Ref: BastionSubnetCidrs ]
+        - Fn::Join:
+            - ","
+            - - Fn::Select: [ 0, Ref: BastionSubnetCidrs ]
+              - Fn::Select: [ 1, Ref: BastionSubnetCidrs ]
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnetCidrs"
+
+  BastionSubnet1Cidr:
+    Value:
+      Fn::Select: [ 0, Ref: BastionSubnetCidrs ]
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnet1Cidr"
+
+  BastionSubnet2Cidr:
+    Value:
+      Fn::Select: [ 1, Ref: BastionSubnetCidrs ]
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnet2Cidr"
+
+  BastionSubnet3Cidr:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Select: [ 2, Ref: BastionSubnetCidrs ]
+        - "none"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:BastionSubnet3Cidr"
+
+  DbSubnetGroupName:
+    Value:
+      Ref: DbSubnetGroup
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:DbSubnetGroupName"
+
+  ElastiCacheSubnetGroupName:
+    Value:
+      Ref: ElastiCacheSubnetGroup
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:ElastiCacheSubnetGroupName"
+
+  PlatformSecurityGroupId:
+    Value:
+      Ref: PlatformSecurityGroup
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PlatformSecurityGroupId"
