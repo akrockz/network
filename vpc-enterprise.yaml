@@ -1,0 +1,595 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Enterprise VPC resources
+
+Parameters:
+  AzList:
+    Description: Comma delimited list of AZs in this region
+    Type: String
+
+  ResourceNamespace:
+    Description: Output export prefix
+    Type: String
+
+  VpcId:
+    Description: VPC id
+    Type: String
+
+  VpcName:
+    Description: VPC Name
+    Type: String
+
+  PrivateSubnetCidrs:
+    Description: Private subnet CIDR list
+    Type: CommaDelimitedList
+
+  PeeringCidrBlocks:
+    Description: List of peering CIDR blocks
+    Type: CommaDelimitedList
+
+  PeeringConnectionIds:
+    Description: List of of peering connection ids
+    Type: CommaDelimitedList
+
+  # CustomerGateway1Id:
+  #   Description: Customer gateway id
+  #   Type: String
+
+  BastionSubnetCidrs:
+    Type: CommaDelimitedList
+
+Conditions:
+  ThreeAzs: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 2, "Fn::Split": [ ",",  "Fn::Sub": "${AzList},," ] ], "" ] ] }
+  PeeringConnection0Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 0, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection1Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 1, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection2Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 2, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection3Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 3, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection4Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 4, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection5Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 5, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection6Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 6, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection7Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 7, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection8Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 8, Ref: PeeringConnectionIds ], "" ] ] }
+  PeeringConnection9Exists: { "Fn::Not": [ "Fn::Equals": [ "Fn::Select": [ 9, Ref: PeeringConnectionIds ], "" ] ] }
+  # CustomerGateway1Exists: { "Fn::Not": [ "Fn::Equals": [ Ref: CustomerGateway1Id, "" ] ] }
+
+Resources:
+
+  VpnGateway:
+    Type: AWS::EC2::VPNGateway
+    Properties:
+      Type: ipsec.1
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:VpnGateway1"
+
+  VpnGatewayVpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpnGatewayId:
+        Ref: VpnGateway
+      VpcId:
+        Ref: VpcId
+
+  # CustomerGateway1VpnConnection:
+  #   Type: AWS::EC2::VPNConnection
+  #   Condition: CustomerGateway1Exists
+  #   Properties:
+  #     Type: ipsec.1
+  #     CustomerGatewayId:
+  #       Ref: CustomerGateway1Id
+  #     StaticRoutesOnly: 'false'
+  #     VpnGatewayId:
+  #       Ref: VpnGateway
+  #     Tags:
+  #       - Key: Name
+  #         Value:
+  #           Fn::Sub: "${ResourceNamespace}:${VpcName}:CustomerGateway1VpnConnection"
+
+  VpcFlowLogIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  VpcFlowLogIamRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: root
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Effect: Allow
+            Resource: '*'
+      Roles:
+        - Ref: VpcFlowLogIamRole
+
+  VpcLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 90
+      LogGroupName:
+        Fn::Sub: "${ResourceNamespace}-${VpcName}"
+
+  VpcFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn:
+        Fn::GetAtt:
+          - VpcFlowLogIamRole
+          - Arn
+      LogGroupName:
+        Ref: VpcLogGroup
+      ResourceId:
+        Ref: VpcId
+      ResourceType: VPC
+      TrafficType: ALL
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 0, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 0, { Ref: PrivateSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet1"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 1, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 1, { Ref: PrivateSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet2"
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: ThreeAzs
+    Properties:
+      AvailabilityZone: { "Fn::Select": [ 2, "Fn::GetAZs": "" ] }
+      CidrBlock: { "Fn::Select": [ 2, { Ref: PrivateSubnetCidrs } ] }
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet3"
+
+  PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnetRouteTable"
+
+  VpnGatewayRoutePropagation:
+    DependsOn: VpnGatewayVpcGatewayAttachment
+    Type: AWS::EC2::VPNGatewayRoutePropagation
+    Properties:
+      RouteTableIds:
+      - Ref: PrivateSubnetRouteTable
+      VpnGatewayId:
+        Ref: VpnGateway
+
+  VpcS3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - '*'
+            Resource:
+              - 'arn:aws:s3:::*'
+      RouteTableIds:
+        - Ref: PrivateSubnetRouteTable
+      ServiceName:
+        Fn::Sub: "com.amazonaws.${AWS::Region}.s3"
+      VpcId:
+        Ref: VpcId
+
+  VpcDynamoDbEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - "*"
+            Resource:
+              - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*
+      RouteTableIds:
+        - Ref: PrivateSubnetRouteTable
+      ServiceName:
+        Fn::Sub: com.amazonaws.${AWS::Region}.dynamodb
+      VpcId:
+        Ref: VpcId
+
+  PrivateSubnetToPeeringConnection0Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection0Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 0, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 0, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection1Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection1Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 1, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 1, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection2Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection2Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 2, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 2, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection3Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection3Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 3, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 3, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection4Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection4Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 4, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 4, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection5Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection5Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 5, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 5, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection6Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection6Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 6, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 6, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection7Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection7Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 7, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 7, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection8Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection8Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 8, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 8, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnetToPeeringConnection9Route:
+    Type: AWS::EC2::Route
+    Condition: PeeringConnection9Exists
+    Properties:
+      DestinationCidrBlock:
+        Fn::Select: [ 9, Ref: PeeringCidrBlocks ]
+      VpcPeeringConnectionId:
+        Fn::Select: [ 9, Ref: PeeringConnectionIds ]
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: PrivateSubnet2
+
+  PrivateSubnet3RouteTableAssociation:
+    Condition: ThreeAzs
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: PrivateSubnet3
+
+  RedShiftClusterSubnetGroup:
+    Type: AWS::Redshift::ClusterSubnetGroup
+    Properties:
+      Description: RedShiftClusterSubnetGroup
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:RedShiftClusterSubnetGroup"
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DbSubnetGroup
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:DbSubnetGroup"
+
+  ElastiCacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: ElastiCacheSubnetGroup
+      SubnetIds:
+        Fn::If:
+          - ThreeAzs
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+            - Ref: PrivateSubnet3
+          - - Ref: PrivateSubnet1
+            - Ref: PrivateSubnet2
+
+  PlatformSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Platform security group
+      GroupName:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PlatformSecurityGroup"
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - CidrIp: { "Fn::Select": [ 0, Ref: BastionSubnetCidrs ] }
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "SSH access from Bastion Subnet in AZ1"
+        - CidrIp: { "Fn::Select": [ 1, Ref: BastionSubnetCidrs ] }
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "SSH access from Bastion Subnet in AZ2"
+        - CidrIp: { "Fn::Select": [ 2, Ref: BastionSubnetCidrs ] }
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+          Description: "SSH access from Bastion Subnet in AZ3"
+        - CidrIp: { "Fn::Select": [ 0, Ref: BastionSubnetCidrs ] }
+          FromPort: 3389
+          IpProtocol: TCP
+          ToPort: 3389
+          Description: "MS RDP access from Bastion Subnet in AZ1"
+        - CidrIp: { "Fn::Select": [ 1, Ref: BastionSubnetCidrs ] }
+          FromPort: 3389
+          IpProtocol: TCP
+          ToPort: 3389
+          Description: "MS RDP access from Bastion Subnet in AZ2"
+        - CidrIp: { "Fn::Select": [ 2, Ref: BastionSubnetCidrs ] }
+          FromPort: 3389
+          IpProtocol: TCP
+          ToPort: 3389
+          Description: "MS RDP access from Bastion Subnet in AZ3"
+        - CidrIp: { "Fn::Select": [ 0, Ref: BastionSubnetCidrs ] }
+          FromPort: 3306
+          IpProtocol: TCP
+          ToPort: 3306
+          Description: "MySQL access from Bastion Subnet in AZ1"
+        - CidrIp: { "Fn::Select": [ 1, Ref: BastionSubnetCidrs ] }
+          FromPort: 3306
+          IpProtocol: TCP
+          ToPort: 3306
+          Description: "MySQL access from Bastion Subnet in AZ2"
+        - CidrIp: { "Fn::Select": [ 2, Ref: BastionSubnetCidrs ] }
+          FromPort: 3306
+          IpProtocol: TCP
+          ToPort: 3306
+          Description: "MySQL access from Bastion Subnet in AZ3"
+        - CidrIp: { "Fn::Select": [ 0, Ref: BastionSubnetCidrs ] }
+          FromPort: 5432
+          IpProtocol: TCP
+          ToPort: 5432
+          Description: "PostgreSQL access from Bastion Subnet in AZ1"
+        - CidrIp: { "Fn::Select": [ 1, Ref: BastionSubnetCidrs ] }
+          FromPort: 5432
+          IpProtocol: TCP
+          ToPort: 5432
+          Description: "PostgreSQL access from Bastion Subnet in AZ2"
+        - CidrIp: { "Fn::Select": [ 2, Ref: BastionSubnetCidrs ] }
+          FromPort: 5432
+          IpProtocol: TCP
+          ToPort: 5432
+          Description: "PostgreSQL access from Bastion Subnet in AZ3"
+        - CidrIp: { "Fn::Select": [ 0, Ref: BastionSubnetCidrs ] }
+          FromPort: 1521
+          IpProtocol: TCP
+          ToPort: 1521
+          Description: "Oracle DB access from Bastion Subnet in AZ1"
+        - CidrIp: { "Fn::Select": [ 1, Ref: BastionSubnetCidrs ] }
+          FromPort: 1521
+          IpProtocol: TCP
+          ToPort: 1521
+          Description: "Oracle DB access from Bastion Subnet in AZ2"
+        - CidrIp: { "Fn::Select": [ 2, Ref: BastionSubnetCidrs ] }
+          FromPort: 1521
+          IpProtocol: TCP
+          ToPort: 1521
+          Description: "Oracle DB access from Bastion Subnet in AZ3"
+        - CidrIp: { "Fn::Select": [ 0, Ref: BastionSubnetCidrs ] }
+          FromPort: 1433
+          IpProtocol: TCP
+          ToPort: 1433
+          Description: "MS SQL access from Bastion Subnet in AZ1"
+        - CidrIp: { "Fn::Select": [ 1, Ref: BastionSubnetCidrs ] }
+          FromPort: 1433
+          IpProtocol: TCP
+          ToPort: 1433
+          Description: "MS SQL access from Bastion Subnet in AZ2"
+        - CidrIp: { "Fn::Select": [ 2, Ref: BastionSubnetCidrs ] }
+          FromPort: 1433
+          IpProtocol: TCP
+          ToPort: 1433
+          Description: "MS SQL access from Bastion Subnet in AZ3"
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Sub: "${ResourceNamespace}:${VpcName}:PlatformSecurityGroup"
+
+Outputs:
+  PrivateSubnetIds:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Fn::Sub: "${PrivateSubnet1},${PrivateSubnet2},${PrivateSubnet3}"
+        - Fn::Sub: "${PrivateSubnet1},${PrivateSubnet2}"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnetIds"
+
+  PrivateSubnet1Id:
+    Value:
+      Ref: PrivateSubnet1
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet1Id"
+
+  PrivateSubnet2Id:
+    Value:
+      Ref: PrivateSubnet2
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet2Id"
+
+  PrivateSubnet3Id:
+    Value:
+      Fn::If:
+        - ThreeAzs
+        - Ref: PrivateSubnet3
+        - "none"
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnet3Id"
+
+  DbSubnetGroupName:
+    Value:
+      Ref: DbSubnetGroup
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:DbSubnetGroupName"
+
+  RedShiftClusterSubnetGroupName:
+    Value:
+      Ref: RedShiftClusterSubnetGroup
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:RedShiftClusterSubnetGroupName"
+
+  ElastiCacheSubnetGroupName:
+    Value:
+      Ref: ElastiCacheSubnetGroup
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:ElastiCacheSubnetGroupName"
+
+  PlatformSecurityGroupId:
+    Value:
+      Ref: PlatformSecurityGroup
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PlatformSecurityGroupId"
+
+  PrivateSubnetRouteTableId:
+    Value:
+      Ref: PrivateSubnetRouteTable
+    Export:
+      Name:
+        Fn::Sub: "${ResourceNamespace}:${VpcName}:PrivateSubnetRouteTableId"
+
