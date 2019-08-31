@@ -1,0 +1,26 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Additional VPC routes
+
+Parameters:
+  Destination:
+    Type: String
+    Default: ""
+
+  Target: 
+    Type: String
+    Default: ""
+
+  RouteTableID: 
+    Type: String
+
+Resources:
+  EnterpriseVpcRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock:
+        Ref: Destination
+      GatewayId:
+        Ref: Target
+      RouteTableId:
+        Ref: RouteTableID
