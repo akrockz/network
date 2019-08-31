@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Dev network stack
+
+Parameters:
+  ArtifactBaseUrl:
+    Description: Base URL for artifacts in S3
+    Type: String
+
+  ServicesVpcId:
+    Description: VPC id of Services VPC
+    Type: String
+
+  ServicesVpcCidr:
+    Description: VPC CIDR of Services VPC
+    Type: String
+
+  ServicesAccountId:
+    Description: Account id of Services VPC
+    Type: String
+
+  ServicesPeerAcceptorRoleArn:
+    Description: Role ARN of peer request acceptor role
+    Type: String
+
+  HostedZoneName:
+    Type: String
+
+Mappings:
+  # Account: Dev1
+  "543453":
+    ap-southeast-1:
+      RegionName: sin
+      AccountName: dev1
+      AccountType: nonprod
+      EnterpriseVpcCidr: "100.1190.1280.00/21"
+      EnterpriseVpcPrivateSubnetCidrs: [ "1000.1190.128.0/23", "100.1199.130.0/23", "109.1199.132.0/23", "107.119867.134.0/23" ]
+      CustomerGatewayBgpAsn: "BGPASNNONPROD"
+      CustomerGatewayIpAddress: "GatewayIPADDRESSNonProd"
+      DnsNtpServers: [ "1691.2541.1691.2531" ]
+      BastionSubnetCidrs: [ "101.1119.126.48/28", "101.1191.126.64/28", "101.1191.126.80/28" ]
+
+Conditions:
+  CreateHostedZone:
+    Fn::Equals: [ Ref: "AWS::Region", "ap-southeast-1" ]
+
+Resources:
+  # CustomerGateway1:
+  #   Type: AWS::EC2::CustomerGateway
+  #   Properties:
+  #     BgpAsn: { "Fn::FindInMap": [ Ref: "AWS::AccountId", Ref: "AWS::Region", CustomerGatewayBgpAsn ] }
+  #     IpAddress: { "Fn::FindInMap": [ Ref: "AWS::AccountId", Ref: "AWS::Region", CustomerGatewayIpAddress ] }
+  #     Type: ipsec.1
+  #     Tags:
+  #       - Key: Name
+  #         Value: { "Fn::Sub": "${AWS::StackName}:CustomerGateway1" }
+
+  EnterpriseVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: { "Fn::FindInMap": [ Ref: "AWS::AccountId", Ref: "AWS::Region", EnterpriseVpcCidr] }
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: { "Fn::Sub": "${AWS::StackName}:EnterpriseVpc" }
+
+  EnterpriseVpcServicesVpcPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: { Ref: EnterpriseVpc }
+      PeerVpcId: { Ref: ServicesVpcId }
+      PeerOwnerId: { Ref: ServicesAccountId }
+      PeerRoleArn: { Ref: ServicesPeerAcceptorRoleArn }
+      Tags:
+        - Key: Name
+          Value: { "Fn::Sub": "${AWS::StackName}:EnterpriseVpcServicesVpcPeeringConnection" }
+
+  DhcpOptions:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName:
+        Fn::Join:
+        - "."
+        - - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", RegionName ]
+          - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountName ]
+          - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountType ]
+          - Ref: HostedZoneName
+      DomainNameServers:
+        Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", DnsNtpServers ]
+      NtpServers:
+        Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", DnsNtpServers ]
+      Tags:
+        - Key: Name
+          Value: { "Fn::Sub": "${AWS::StackName}:DhcpOptions" }
+
+  DhcpOptionsEnterpriseVpcAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      DhcpOptionsId:
+        Ref: DhcpOptions
+      VpcId:
+        Ref: EnterpriseVpc
+
+  EnterpriseVpcResources:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        "Fn::Sub": "${ArtifactBaseUrl}/vpc-enterprise.yaml"
+      Parameters:
+        AzList: { "Fn::Join": [ ",", "Fn::GetAZs": "" ] }
+        ResourceNamespace: { Ref: "AWS::StackName" }
+        VpcName: EnterpriseVpc
+        VpcId: { Ref: EnterpriseVpc }
+        PrivateSubnetCidrs: { "Fn::Join": [ ",", { "Fn::FindInMap": [ Ref: "AWS::AccountId", Ref: "AWS::Region", EnterpriseVpcPrivateSubnetCidrs ] } ] }
+        PeeringCidrBlocks:
+          Fn::Join:
+            - ","
+            - - Ref: ServicesVpcCidr
+              - ",,,,,,,,,"
+        PeeringConnectionIds:
+          Fn::Join:
+            - ","
+            - - Ref: EnterpriseVpcServicesVpcPeeringConnection
+              - ",,,,,,,,,"
+        # CustomerGateway1Id: { Ref: CustomerGateway1 }
+        BastionSubnetCidrs: { "Fn::Join": [ ",", { "Fn::FindInMap": [ Ref: "AWS::AccountId", Ref: "AWS::Region", BastionSubnetCidrs ] } ] }
+
+  HostedZone:
+    Condition: CreateHostedZone
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name:
+        Fn::Join:
+        - "."
+        - - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountName ]
+          - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountType ]
+          - Ref: HostedZoneName
+      VPCs:
+        - VPCId:
+            Ref: EnterpriseVpc
+          VPCRegion:
+            Ref: AWS::Region
+
+Outputs:
+  EnterpriseVpcId:
+    Value:
+      Ref: EnterpriseVpc
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}:EnterpriseVpc:VpcId"
+
+  EnterpriseVpcCidr:
+    Value:
+      Fn::GetAtt: [ EnterpriseVpc, CidrBlock ]
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}:EnterpriseVpc:VpcCidr"
+
+
+  EnterpriseVpcServicesVpcPeeringConnectionId:
+    Value:
+      Ref: EnterpriseVpcServicesVpcPeeringConnection
+
+  HostedZoneName:
+    Value:
+      Fn::Join:
+      - "."
+      - - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountName ]
+        - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountType ]
+        - Ref: HostedZoneName
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}:HostedZoneName"
+
+  RegionalHostedZoneName:
+    Value:
+      Fn::Join:
+      - "."
+      - - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", RegionName ]
+        - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountName ]
+        - Fn::FindInMap: [ Ref: "AWS::AccountId", Ref: "AWS::Region", AccountType ]
+        - Ref: HostedZoneName
+    Export:
+      Name:
+        Fn::Sub: "${AWS::StackName}:RegionalHostedZoneName"
